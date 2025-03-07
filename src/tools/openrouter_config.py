@@ -1,6 +1,6 @@
 import os
 import time
-from google import genai
+from openai import OpenAI  # 替换 genai 导入
 from dotenv import load_dotenv
 from dataclasses import dataclass
 import backoff
@@ -37,20 +37,27 @@ if os.path.exists(env_path):
 else:
     logger.warning(f"{ERROR_ICON} 未找到环境变量文件: {env_path}")
 
+
 # 验证环境变量
-api_key = os.getenv("GEMINI_API_KEY")
-model = os.getenv("GEMINI_MODEL")
+api_key = os.getenv("DEEPSEEK_API_KEY")
+model = os.getenv("DEEPSEEK_MODEL")
 
 if not api_key:
-    logger.error(f"{ERROR_ICON} 未找到 GEMINI_API_KEY 环境变量")
-    raise ValueError("GEMINI_API_KEY not found in environment variables")
+    logger.error(f"{ERROR_ICON} 未找到 DEEPSEEK_API_KEY 环境变量")
+    raise ValueError("DEEPSEEK_API_KEY not found in environment variables")
 if not model:
-    model = "gemini-1.5-flash"
+    model = "deepseek-chat"  # 修改默认模型
     logger.info(f"{WAIT_ICON} 使用默认模型: {model}")
 
-# 初始化 Gemini 客户端
-client = genai.Client(api_key=api_key)
-logger.info(f"{SUCCESS_ICON} Gemini 客户端初始化成功")
+# 初始化 DeepSeek 客户端
+print('key---------->', api_key)
+client = OpenAI(
+    api_key=api_key,
+    # base_url="https://api.siliconflow.cn/v1"
+    base_url="https://api.deepseek.com"  # DeepSeek API 端点
+)
+logger.info(f"{SUCCESS_ICON} DeepSeek 客户端初始化成功")
+
 
 
 @backoff.on_exception(
@@ -63,19 +70,32 @@ logger.info(f"{SUCCESS_ICON} Gemini 客户端初始化成功")
 def generate_content_with_retry(model, contents, config=None):
     """带重试机制的内容生成函数"""
     try:
-        logger.info(f"{WAIT_ICON} 正在调用 Gemini API...")
+        logger.info(f"{WAIT_ICON} 正在调用 DeepSeek API...")
         logger.debug(f"请求内容: {contents}")
         logger.debug(f"请求配置: {config}")
 
-        response = client.models.generate_content(
+        messages = [{"role": "user", "content": contents}]
+        if config and 'system_instruction' in config:
+            messages.insert(0, {"role": "system", "content": config['system_instruction']})
+
+        response = client.chat.completions.create(
             model=model,
-            contents=contents,
-            config=config
+            messages=messages
         )
 
+        response_text = response.choices[0].message.content
+
         logger.info(f"{SUCCESS_ICON} API 调用成功")
-        logger.debug(f"响应内容: {response.text[:500]}...")
-        return response
+        logger.info(f"响应内容: {response_text[:500]}..." if len(
+            str(response_text)) > 500 else f"响应内容: {response_text}")
+        
+        # 创建一个类似于 genai 响应的对象
+        class Response:
+            def __init__(self, text):
+                self.text = text
+        
+        return Response(response_text)
+
     except Exception as e:
         if "AFC is enabled" in str(e):
             logger.warning(f"{ERROR_ICON} 触发 API 限制，等待重试... 错误: {str(e)}")
@@ -90,7 +110,7 @@ def get_chat_completion(messages, model=None, max_retries=3, initial_retry_delay
     """获取聊天完成结果，包含重试逻辑"""
     try:
         if model is None:
-            model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+            model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
 
         logger.info(f"{WAIT_ICON} 使用模型: {model}")
         logger.debug(f"消息内容: {messages}")
@@ -156,3 +176,4 @@ def get_chat_completion(messages, model=None, max_retries=3, initial_retry_delay
     except Exception as e:
         logger.error(f"{ERROR_ICON} get_chat_completion 发生错误: {str(e)}")
         return None
+
